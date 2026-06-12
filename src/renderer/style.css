@@ -7,7 +7,7 @@ html, body {
 body {
     display: flex;
     align-items: stretch;
-    background-color: #1e1e1e;
+    background-color: #f0f2f5;
 }
 
 #searchInput {
@@ -17,18 +17,19 @@ body {
     border: none;
     outline: none;
     font-size: 18px;
-    padding: 0 20px;
-    background-color: #252526;
-    color: #e0e0e0;
-    border-radius: 8px;
+    padding: 0 24px;
+    background-color: #ffffff;
+    color: #1a1a2e;
+    border-radius: 12px;
     transition: box-shadow 0.2s ease, background-color 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 #searchInput::placeholder {
-    color: #6e6e6e;
+    color: #9aa0a6;
 }
 
 #searchInput:focus {
-    box-shadow: 0 0 0 2px #0078d4;
-    background-color: #2d2d2d;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10), 0 0 0 2px #4a90d9;
+    background-color: #ffffff;
 }
