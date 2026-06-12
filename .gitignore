@@ -143,3 +143,16 @@ vite.config.ts.timestamp-*
 .vite/
 
 .idea/
+
+# Electron
+dist/
+dist-win/
+
+# Playwright
+playwright-state.json
+playwright-report/
+test-results/
+
+# OS
+.DS_Store
+Thumbs.db
