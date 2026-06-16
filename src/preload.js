@@ -5,4 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onWindowHidden: (callback) => ipcRenderer.on('window-hidden', callback),
   submitInput: (text) => ipcRenderer.send('input-submit', text),
   closeWindow: () => ipcRenderer.send('window-close'),
+  startWindowDrag: (x, y) => ipcRenderer.send('window-drag-start', x, y),
+  moveWindow: (x, y) => ipcRenderer.send('window-drag-move', x, y),
+  endWindowDrag: () => ipcRenderer.send('window-drag-end'),
 });

@@ -7,6 +7,11 @@ app.commandLine.appendSwitch('disable-gpu-cache');
 let mainWindow = null;
 let tray = null;
 let contextMenu = null;
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let winStartX = 0;
+let winStartY = 0;
 
 function createTray() {
   const iconSize = 16;
@@ -191,4 +196,26 @@ ipcMain.on('trigger-playwright', (_event, text) => {
   automation.performAutomation(text).catch((err) => {
     console.error('[Playwright] Unexpected error:', err.message);
   });
+});
+
+ipcMain.on('window-drag-start', (_event, x, y) => {
+  isDragging = true;
+  dragStartX = x;
+  dragStartY = y;
+  const b = mainWindow.getBounds();
+  winStartX = b.x;
+  winStartY = b.y;
+});
+
+ipcMain.on('window-drag-move', (_event, x, y) => {
+  if (!isDragging) return;
+  const area = screen.getPrimaryDisplay().workArea;
+  const wBounds = mainWindow.getBounds();
+  const newX = Math.max(area.x, Math.min(winStartX + (x - dragStartX), area.x + area.width - wBounds.width));
+  const newY = Math.max(area.y, Math.min(winStartY + (y - dragStartY), area.y + area.height - wBounds.height));
+  mainWindow.setBounds({ x: newX, y: newY, width: wBounds.width, height: wBounds.height });
+});
+
+ipcMain.on('window-drag-end', () => {
+  isDragging = false;
 });
