@@ -4,7 +4,39 @@ const fs = require('fs');
 const os = require('os');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
+
+const LOG_FILE = path.join("D:/gust/dev/project/github.com/porouniverse/ask-ai-copilot@develop", 'ask-ai-copilot-debug.log');
+
+function log(...args) {
+    const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    const line = `[${new Date().toISOString()}] ${msg}\n`;
+    fs.appendFileSync(LOG_FILE, line);
+}
+
+/**
+ * 获取实际使用的 config.json 路径
+ * 打包后优先读取 EXE 同级目录下的外部配置，找不到则降级到 asar 内置版本
+ * @returns {string} config.json 的实际路径
+ */
+function getConfigPath() {
+    const exeDir = path.dirname(process.execPath);
+    const externalConfig = path.join(exeDir, 'config.json');
+
+    log('[Config] execPath:', process.execPath);
+    log('[Config] exeDir (process.execPath parent):', exeDir);
+    log('[Config] __dirname:', __dirname);
+    log('[Config] Checking external config:', externalConfig);
+
+    if (fs.existsSync(externalConfig)) {
+        log('[Config] Using external config.json:', externalConfig);
+        return externalConfig;
+    }
+    log('[Config] External config.json not found, using bundled:', CONFIG_PATH);
+    return CONFIG_PATH;
+}
+
 const LOCK_FILES = ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'chrome_kill占有令'];
+const CHROME_STATE_FILES = ['Last Session', 'Last Tabs', 'Current Session', 'Current Tabs'];
 
 /**
  * 获取源 Chrome User Data 目录路径
@@ -37,6 +69,24 @@ function clearLockFiles(dir) {
 }
 
 /**
+ * 清理 Chrome 保存的窗口状态文件，防止旧的窗口位置/大小覆盖 --start-maximized
+ * 这些文件记录在 profile 目录（如 Default/）下
+ */
+function clearChromeStateFiles(profileDir) {
+    for (const stateFile of CHROME_STATE_FILES) {
+        const statePath = path.join(profileDir, stateFile);
+        try {
+            if (fs.existsSync(statePath)) {
+                fs.unlinkSync(statePath);
+                console.log('[Playwright] Removed Chrome state file:', statePath);
+            }
+        } catch (err) {
+            console.warn('[Playwright] Could not remove Chrome state file:', statePath, err.message);
+        }
+    }
+}
+
+/**
  * 递归复制目录
  */
 async function copyDirRecursive(src, dest) {
@@ -61,40 +111,35 @@ async function copyDirRecursive(src, dest) {
     }
 }
 
-
 /**
- * 获取指定站点的 Playwright profile 副本目录路径
- * 结构：User Data 同级目录下 user_data_copy_for_playwright/site_{index}/Default
- * @param {number} siteIndex 站点索引
- * @param {string} sourceProfile 源 profile 名称
+ * 获取所有 site 共用的 Playwright User Data 副本目录路径
+ * 结构：User Data 同级目录下 user_data_copy_for_playwright/Default
  * @returns {{ profileDir: string, parentDir: string }}
  */
-function getSiteProfilePaths(siteIndex, sourceProfile) {
+function getSharedUserDataPaths() {
     const userDataDir = getChromeUserDataDir();
-    const parentDir = path.join(userDataDir, '..', `user_data_copy_for_playwright`, `site_${siteIndex}`);
+    const parentDir = path.join(userDataDir, '..', 'user_data_copy_for_playwright');
     const profileDir = path.join(parentDir, 'Default');
     return { profileDir, parentDir };
 }
 
 /**
- * 为指定站点确保 Playwright profile 副本存在；若不存在则从源 profile 复制
- * 每个 site 用独立的子目录，避免 Playwright 复用已有浏览器实例
- * @param {number} siteIndex 站点索引
+ * 确保共享 User Data 副本存在；若不存在则从源 profile 复制（仅复制一次）
  * @param {string} sourceProfile 源 profile 名称
- * @returns {string} 站点 profile 的父目录路径
+ * @returns {string} 共享 profile 的父目录路径
  */
-async function ensureProfileCopyForSite(siteIndex, sourceProfile) {
-    const { profileDir, parentDir } = getSiteProfilePaths(siteIndex, sourceProfile);
+async function ensureSharedProfileCopy(sourceProfile) {
+    const { profileDir, parentDir } = getSharedUserDataPaths();
 
     if (fs.existsSync(profileDir)) {
         const files = fs.readdirSync(profileDir);
         if (files.length > 0) {
-            console.log(`[Playwright] Profile copy already exists for site ${siteIndex} at:`, profileDir);
+            console.log('[Playwright] Shared profile copy already exists at:', profileDir);
             return parentDir;
         }
     }
 
-    console.log(`[Playwright] Profile copy not found for site ${siteIndex}, creating from source...`);
+    console.log('[Playwright] Shared profile copy not found, creating from source...');
 
     fs.mkdirSync(parentDir, { recursive: true });
 
@@ -107,22 +152,17 @@ async function ensureProfileCopyForSite(siteIndex, sourceProfile) {
 
     await copyDirRecursive(sourceDir, profileDir);
 
-    console.log(`[Playwright] Profile copy created for site ${siteIndex} at:`, profileDir);
+    console.log('[Playwright] Shared profile copy created at:', profileDir);
     return parentDir;
 }
 
 /**
- * 在单个站点上执行自动化操作
- * @param {object} context 浏览器上下文对象
+ * 在单个页签上执行自动化操作
+ * @param {object} page Playwright Page 对象
  * @param {object} site 站点配置
  * @param {string} text 用户输入的文本
  */
-async function performSiteAutomation(context, site, text) {
-    let page = context.pages()[0];
-    if (!page) {
-        page = await context.newPage();
-    }
-
+async function performSiteAutomation(page, site, text) {
     console.log('[Playwright] Navigating to:', site.url);
     await page.goto(site.url, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
@@ -144,30 +184,19 @@ async function performSiteAutomation(context, site, text) {
 }
 
 /**
- * 处理单个站点的自动化流程，每个站点拥有独立的错误处理
+ * 在单个页签上处理单个站点的自动化流程
+ * @param {object} context 浏览器上下文对象
  * @param {object} site 站点配置
- * @param {number} siteIndex 站点索引
  * @param {string} text 用户输入的文本
  * @returns {{ site: object, success: boolean, error: string|null }}
  */
-async function processSite(site, siteIndex, text) {
+async function processSiteTab(context, site, text) {
     try {
         console.log('[Playwright] Processing site:', site.name, site.url);
 
-        const userDataDir = await ensureProfileCopyForSite(siteIndex, site.sourceProfile);
-        clearLockFiles(userDataDir);
+        const page = await context.newPage();
+        await performSiteAutomation(page, site, text);
 
-        console.log('[Playwright] Launching Chrome with profile:', userDataDir);
-        const context = await chromium.launchPersistentContext(userDataDir, {
-            channel: 'chrome',
-            headless: false,
-            args: [
-                '--no-first-run',
-                '--no-default-browser-check',
-            ],
-        });
-
-        await performSiteAutomation(context, site, text);
         return { site, success: true, error: null };
     } catch (err) {
         console.error(`[Playwright] Site "${site.name}" failed:`, err.message);
@@ -176,13 +205,14 @@ async function processSite(site, siteIndex, text) {
 }
 
 /**
- * 执行浏览器自动化（遍历 config.sites 所有站点）
+ * 执行浏览器自动化（遍历 config.sites 所有站点，共用一个浏览器实例和 User Data）
  * @param {string} text 用户输入的文本
  */
 async function performAutomation(text) {
+    const actualConfigPath = getConfigPath();
     let config;
     try {
-        const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
+        const raw = fs.readFileSync(actualConfigPath, 'utf-8');
         config = JSON.parse(raw);
     } catch (err) {
         console.error('[Playwright] Failed to read config.json:', err.message);
@@ -197,9 +227,29 @@ async function performAutomation(text) {
 
     console.log('[Playwright] User input:', text);
 
+    // 所有 site 共用第一个 site 的源 profile（假设同属一个账号）
+    const sharedUserDataDir = await ensureSharedProfileCopy(sites[0].sourceProfile);
+    clearLockFiles(sharedUserDataDir);
+    clearChromeStateFiles(path.join(sharedUserDataDir, 'Default'));
+
+    console.log('[Playwright] Launching single Chrome instance with shared profile:', sharedUserDataDir);
+    const context = await chromium.launchPersistentContext(sharedUserDataDir, {
+        channel: 'chrome',
+        headless: false,
+        viewport: null,
+        args: [
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--start-maximized',
+        ],
+    });
+
     const results = await Promise.all(
-        sites.map((site, index) => processSite(site, index, text))
+        sites.map(site => processSiteTab(context, site, text))
     );
+
+    // await context.close();
+    // console.log('[Playwright] Browser closed.');
 
     const succeeded = results.filter(r => r.success);
     const failed = results.filter(r => !r.success);

@@ -133,7 +133,7 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
 
-  const ret = globalShortcut.register('CommandOrControl+Alt+Shift+K', () => {
+  const ret = globalShortcut.register('CommandOrControl+Alt+Shift+O', () => {
     toggleWindow();
   });
 
