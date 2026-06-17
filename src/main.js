@@ -143,9 +143,9 @@ app.whenReady().then(() => {
   });
 
   if (!ret) {
-    console.error('[AskAI Copilot] Global shortcut Ctrl+Shift+K registration failed. It may be taken by another app.');
+    console.error('[AskAI Copilot] Global shortcut CommandOrControl+Alt+Shift+O registration failed. It may be taken by another app.');
   } else {
-    console.log('[AskAI Copilot] Global shortcut Ctrl+Shift+K registered successfully.');
+    console.log('[AskAI Copilot] Global shortcut CommandOrControl+Alt+Shift+O registered successfully.');
   }
 
   if (process.argv.includes('--trigger-test')) {
