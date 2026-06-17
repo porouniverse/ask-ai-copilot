@@ -2,7 +2,7 @@
   "sites": [
     {
       "name": "元宝",
-      "url": "https://yuanbao.tencent.com/chat/naQivTmsDa?chatMode=temp",
+      "url": "https://yuanbao.tencent.com/chat/naQivTmsDa",
       "inputSelector": "#search-bar > div > div > p",
       "buttonSelector": "#yuanbao-send-btn",
       "inputMode": "contenteditable",

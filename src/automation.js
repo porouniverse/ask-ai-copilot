@@ -3,6 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// 模块级浏览器上下文单例，多次调用 performAutomation 时复用同一个浏览器实例
+let browserContext = null;
+let sharedUserDataDir = null;
+
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 
 const LOG_FILE = path.join("D:/gust/dev/project/github.com/porouniverse/ask-ai-copilot@develop", 'ask-ai-copilot-debug.log');
@@ -124,6 +128,57 @@ function getSharedUserDataPaths() {
 }
 
 /**
+ * 获取或创建浏览器上下文（单例模式）
+ * 只在第一次调用时创建浏览器实例，后续调用直接复用
+ * @returns {object} Playwright BrowserContext 实例
+ */
+async function getOrCreateBrowserContext() {
+    if (browserContext) {
+        // 检查上下文是否仍然有效
+        try {
+            const pages = browserContext.pages();
+            if (pages.length > 0) {
+                console.log('[Playwright] Reusing existing browser context, pages:', pages.length);
+                return browserContext;
+            }
+        } catch (err) {
+            console.warn('[Playwright] Existing context invalid, will recreate:', err.message);
+            browserContext = null;
+        }
+    }
+
+    console.log('[Playwright] Creating new browser context...');
+
+    const { profileDir, parentDir } = getSharedUserDataPaths();
+    if (!fs.existsSync(profileDir) || fs.readdirSync(profileDir).length === 0) {
+        const sourceProfile = 'Default';
+        console.log('[Playwright] Shared profile copy not found, creating from source:', sourceProfile);
+        await ensureSharedProfileCopy(sourceProfile);
+    } else {
+        console.log('[Playwright] Shared profile copy already exists at:', profileDir);
+    }
+
+    clearLockFiles(parentDir);
+    clearChromeStateFiles(profileDir);
+
+    sharedUserDataDir = parentDir;
+
+    browserContext = await chromium.launchPersistentContext(parentDir, {
+        channel: 'chrome',
+        headless: false,
+        viewport: null,
+        args: [
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--start-maximized',
+        ],
+    });
+
+    console.log('[Playwright] Browser context created successfully.');
+    return browserContext;
+}
+
+/**
  * 确保共享 User Data 副本存在；若不存在则从源 profile 复制（仅复制一次）
  * @param {string} sourceProfile 源 profile 名称
  * @returns {string} 共享 profile 的父目录路径
@@ -227,22 +282,8 @@ async function performAutomation(text) {
 
     console.log('[Playwright] User input:', text);
 
-    // 所有 site 共用第一个 site 的源 profile（假设同属一个账号）
-    const sharedUserDataDir = await ensureSharedProfileCopy(sites[0].sourceProfile);
-    clearLockFiles(sharedUserDataDir);
-    clearChromeStateFiles(path.join(sharedUserDataDir, 'Default'));
-
-    console.log('[Playwright] Launching single Chrome instance with shared profile:', sharedUserDataDir);
-    const context = await chromium.launchPersistentContext(sharedUserDataDir, {
-        channel: 'chrome',
-        headless: false,
-        viewport: null,
-        args: [
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--start-maximized',
-        ],
-    });
+    // 获取或创建浏览器上下文（单例模式，复用已有浏览器实例）
+    const context = await getOrCreateBrowserContext();
 
     const results = await Promise.all(
         sites.map(site => processSiteTab(context, site, text))
